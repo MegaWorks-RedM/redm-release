@@ -1,0 +1,108 @@
+name: Cfx.re Release Pipeline
+
+on:
+  workflow_call:
+    inputs:
+      resource_dir:
+        required: false
+        type: string
+        default: '.'
+      version:
+        required: false
+        type: string
+        default: ''
+      changelog:
+        required: false
+        type: string
+        default: ''
+      release_candidate:
+        required: false
+        type: string
+        default: 'false'
+    secrets:
+      CFX_PASSKEY_CREDENTIAL:
+        required: true
+      DISCORD_WEBHOOK:
+        required: true
+      CFX_ASSET_ID_VAR:
+        required: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Caller Repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Upload to Cfx.re Portal
+        id: cfx_deploy
+        uses: alebertz/cfx-escrow-action@main
+        env:
+          CFX_VERSION: ${{ github.event_name == 'push' && github.ref_name || inputs.version }}
+          CFX_RELEASE_CANDIDATE: ${{ github.event_name == 'workflow_dispatch' && inputs.release_candidate || (contains(github.ref, '-beta') && 'true' || 'false') }}
+          CFX_CHANGELOG: ${{ inputs.changelog }}
+        with:
+          resource_dir: ${{ inputs.resource_dir }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          cfx_passkey_credential: ${{ secrets.CFX_PASSKEY_CREDENTIAL }}
+          cfx_asset_id: ${{ secrets.CFX_ASSET_ID_VAR }}
+
+      - name: Notify on discord
+        if: success()
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          INPUT_CHANGELOG: ${{ inputs.changelog }}
+          RELEASE_CANDIDATE: ${{ inputs.release_candidate }}
+        run: |
+          if [[ "${{ contains(github.ref, '-beta') || env.RELEASE_CANDIDATE == 'true' }}" == "true" ]]; then
+            STATUS="🔴 BETA RELEASE"
+            COLOR=15105570
+          else
+            STATUS="🟢 STABLE RELEASE"
+            COLOR=3066993
+          fi
+          
+          CHANGELOG="${INPUT_CHANGELOG}"
+          if [ -z "$CHANGELOG" ]; then
+            LAST_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || true)
+            if [ -n "$LAST_TAG" ]; then
+              CHANGELOG=$(git log ${LAST_TAG}..HEAD --pretty=format:"- %s" --no-merges)
+            else
+              CHANGELOG=$(git log -5 --pretty=format:"- %s" --no-merges)
+            fi
+          fi
+          
+          if [ ${#CHANGELOG} -gt 1000 ]; then
+            CHANGELOG="${CHANGELOG:0:997}..."
+          fi
+          
+          VERSION="${{ github.ref_name }}"
+          REPO="${{ github.repository }}"
+          URL="https://github.com/${{ github.repository }}/releases/tag/${{ github.ref_name }}"
+          
+          JSON_PAYLOAD=$(jq -n \
+            --arg status "$STATUS" \
+            --arg repo_name "${REPO##*/}" \
+            --arg url "$URL" \
+            --argjson color "$COLOR" \
+            --arg version "$VERSION" \
+            --arg repo_url "https://github.com/$REPO" \
+            --arg changelog "$CHANGELOG" \
+            '{
+              embeds: [{
+                title: $status,
+                description: "**\($repo_name)** has just been updated, check it out on CFX PORTAL.",
+                url: $url,
+                color: $color,
+                fields: [
+                  {name: "📦 Version", value: "`\($version)`", inline: true},
+                  {name: "📂 Script", value: "[\($repo_name)](\($repo_url))", inline: true},
+                  {name: "📝 Release Notes", value: $changelog, inline: false}
+                ],
+                footer: {text: "Mega Development Services • Automated Release Message"}
+              }]
+            }')
+
+          curl -H "Content-Type: application/json" -X POST -d "$JSON_PAYLOAD" $DISCORD_WEBHOOK
