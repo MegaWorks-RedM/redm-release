@@ -57,7 +57,7 @@ jobs:
           RELEASE_CANDIDATE: ${{ inputs.release_candidate }}
         run: |
           if [[ "${{ contains(github.ref, '-beta') || env.RELEASE_CANDIDATE == 'true' }}" == "true" ]]; then
-            STATUS="🔴 BETA RELEASE"
+            STATUS="🟡 BETA RELEASE"
             COLOR=15105570
           else
             STATUS="🟢 STABLE RELEASE"
