@@ -44,7 +44,7 @@ jobs:
           CFX_RELEASE_CANDIDATE: ${{ github.event_name == 'workflow_dispatch' && inputs.release_candidate || (contains(github.ref, '-beta') && 'true' || 'false') }}
           CFX_CHANGELOG: ${{ inputs.changelog }}
         with:
-          resource_dir: ${{ inputs.resource_dir }}
+          resource_dir: ${{ github.workspace }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
           cfx_passkey_credential: ${{ secrets.CFX_PASSKEY_CREDENTIAL }}
           cfx_asset_id: ${{ secrets.CFX_ASSET_ID_VAR }}
